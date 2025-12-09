@@ -78,7 +78,7 @@ def estimate_annual_production(
     annual_production_kwh = dc_power.sum()
 
     # Monthly breakdown
-    monthly_production = dc_power.resample("M").sum()
+    monthly_production = dc_power.resample("ME").sum()
 
     return {
         "annual_production_kwh": float(annual_production_kwh),

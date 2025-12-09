@@ -70,15 +70,20 @@ def calculate_payback_period(cash_flows: np.ndarray) -> float:
 
     payback_index = np.where(cumulative_cash_flow >= 0)[0][0]
 
+    # If it pays back exactly at the end of a year
+    if cumulative_cash_flow[payback_index] == 0:
+        return float(payback_index)  # Payback at exact year end
+
     if payback_index == 0:
         return 0.0
 
     # Linear interpolation for fractional year
-    prev_cumulative = cumulative_cash_flow[payback_index - 1]
-    curr_cash_flow = cash_flows[payback_index]
+    # We need the amount still negative at the START of the payback year
+    amount_remaining = -cumulative_cash_flow[payback_index - 1]
+    cash_flow_in_year = cash_flows[payback_index]
 
-    fraction = abs(prev_cumulative) / curr_cash_flow
-    payback_period = payback_index + fraction
+    fraction = amount_remaining / cash_flow_in_year
+    payback_period = payback_index - 1 + fraction  # Start from previous year index
 
     return float(payback_period)
 
