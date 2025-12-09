@@ -1,0 +1,146 @@
+name: CI - PV Business Plan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: windows-latest
+
+    strategy:
+      matrix:
+        python-version: ['3.12']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Miniconda
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        auto-update-conda: true
+        python-version: ${{ matrix.python-version }}
+        miniforge-variant: Mambaforge
+        use-mamba: true
+        channels: conda-forge,defaults
+        activate-environment: pv_business_plan
+        environment-file: environment.yml
+
+    - name: Verify installation
+      shell: bash -l {0}
+      run: |
+        conda info
+        conda list
+        python --version
+        which python
+
+    - name: Lint with flake8
+      shell: bash -l {0}
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 src tests --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings
+        flake8 src tests --count --max-line-length=88 --extend-ignore=E203,W503 --statistics
+
+    - name: Check formatting with black
+      shell: bash -l {0}
+      run: |
+        black --check src tests
+
+    - name: Type check with mypy
+      shell: bash -l {0}
+      run: |
+        mypy src --ignore-missing-imports || true
+
+    - name: Test with pytest
+      shell: bash -l {0}
+      run: |
+        pytest -v --tb=short --cov=src --cov-report=xml --cov-report=term
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+    - name: Check for committed secrets
+      shell: powershell
+      run: |
+        if (Test-Path .env) {
+          Write-Error ".env file should not be committed!"
+          exit 1
+        }
+        Write-Host "✓ No .env file found in repository"
+
+    - name: Verify notebook outputs are cleared
+      shell: bash -l {0}
+      run: |
+        # Check if any notebooks have outputs
+        if jupyter nbconvert --clear-output --inplace --to notebook notebooks/*.ipynb 2>/dev/null; then
+          if git diff --exit-code notebooks/; then
+            echo "✓ All notebook outputs are cleared"
+          else
+            echo "✗ Some notebooks have outputs. Please clear them before committing."
+            exit 1
+          fi
+        else
+          echo "✓ No notebooks to check or already cleared"
+        fi
+
+  database-check:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pv_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: pv_business_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        pip install sqlalchemy psycopg[binary] python-dotenv alembic
+
+    - name: Test database connection
+      env:
+        DB_USER: pv_user
+        DB_PASSWORD: test_password
+        DB_HOST: localhost
+        DB_PORT: 5432
+        DB_NAME: pv_business_db
+      run: |
+        python -c "from src.db import test_connection; assert test_connection()"
+
+    - name: Test Alembic migrations
+      env:
+        DB_USER: pv_user
+        DB_PASSWORD: test_password
+        DB_HOST: localhost
+        DB_PORT: 5432
+        DB_NAME: pv_business_db
+      run: |
+        cd sql
+        alembic upgrade head
+        alembic current
